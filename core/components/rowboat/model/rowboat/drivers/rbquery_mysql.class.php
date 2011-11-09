@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Rowboat
  *
@@ -19,11 +20,12 @@
  *
  * @package rowboat
  */
-require_once dirname(dirname(__FILE__)).'/rbquery.class.php';
+require_once dirname(dirname(__file__)) . '/rbquery.class.php';
 /**
  * @package rowboat
  */
-class rbQuery_mysql extends rbQuery {
+class rbQuery_mysql extends rbQuery
+{
     protected $_operators= array (
         '=',
         '!=',
@@ -57,16 +59,16 @@ class rbQuery_mysql extends rbQuery {
         'AND',
         'OR',
     );
-
     /**
      * Prepare the query for execution
      * 
      * {@inheritDoc}
      */
-    public function prepare() {
+    public function prepare()
+    {
         $this->_preparedSql = array();
         $this->prepareSelect();
-        
+
         if (!empty($this->_where)) {
             $this->prepareWhere();
         }
@@ -77,7 +79,7 @@ class rbQuery_mysql extends rbQuery {
             $this->prepareLimit();
         }
 
-        $this->_sql = trim(implode(" ",$this->_preparedSql));
+        $this->_sql = trim(implode(" ", $this->_preparedSql));
         $this->_prepared = true;
         return $this->_sql;
     }
@@ -87,19 +89,20 @@ class rbQuery_mysql extends rbQuery {
      *
      * {@inheritDoc}
      */
-    protected function prepareSelect() {
+    protected function prepareSelect()
+    {
         $columns = '*';
         if (!empty($this->_columns)) {
             $cs = array();
             foreach ($this->_columns as $column => $alias) {
                 if (empty($alias)) $alias = $column;
-                $cs[] = $alias != $column && !is_integer($column) ? $this->escape($column).' AS '.$this->escape($alias) : $this->escape($alias);
+                $cs[] = $alias != $column && !is_integer($column) ? $this->escape($column) . ' AS ' . $this->escape($alias) : $this->escape($alias);
             }
-            $columns = implode(',',$cs);
+            $columns = implode(',', $cs);
         }
-        
-        $sql = 'SELECT '.$columns.' FROM '.$this->escape($this->_table);
-        if (!empty($this->_tableAlias)) $sql .= ' '.$this->escape($this->_tableAlias);
+
+        $sql = 'SELECT ' . $columns . ' FROM ' . $this->escape($this->_table);
+        if (!empty($this->_tableAlias)) $sql .= ' ' . $this->escape($this->_tableAlias);
         $this->_preparedSql[] = $sql;
     }
 
@@ -108,51 +111,111 @@ class rbQuery_mysql extends rbQuery {
      *
      * {@inheritDoc}
      */
-    protected function prepareWhere() {
+    protected function prepareNestedWhere($condition)
+    {
         $tw = array();
-        $sql = 'WHERE';
-        foreach ($this->_where as $condition) {
-            if (is_array($condition)) {
-                foreach ($condition as $k => $v) {
-                    $operand = empty($tw) ? '' : 'AND';
-                    $operator = '=';
-                    if ($k === 0) {
-                        $tw[] = $operand.' '.$v;
-                    } else if (is_string($k)) {
-                        $op = explode(':',$k);
+        $sql = '';
+        if (is_array($condition)) {
+            $outerOperand = 'AND';
+            foreach ($condition as $k => $v) {
+                $operand = empty($tw) ? '' : ' AND ';
+                $operator = '=';
+                if ($k === 0) {
+                    $tw[] = $operand . ' ' . $v;
+                } else
+                    if (is_string($k)) {
+                        $op = explode(':', $k);
                         if (count($op) == 1) {
                             $field = $op[0];
 
-                        } else if (in_array($op[0],$this->_conditionals)) {
-                            $operand = 'OR';
-                            $field = $op[1];
-                            if (!empty($op[2])) {
-                                $operator = $op[2];
+                        } else
+                            if (in_array($op[0], $this->_conditionals)) {
+                                if (empty($tw)){
+                                    $outerOperand = ' OR ';
+                                }else{
+                                    $operand = 'OR';
+                                }
+                                
+                                $field = $op[1];
+                                if (!empty($op[2])) {
+                                    $operator = $op[2];
+                                }
+                            } else {
+                                if (!empty($op[1])) {
+                                    $operator = $op[1];
+                                }
+                                $field = $op[0];
                             }
-                        } else {
-                            if (!empty($op[1])) {
-                                $operator = $op[1];
+                            $tw[] = $operand . ' ' . $this->escape($field) . ' ' . $operator . ' ' . $this->addParam($field, $v);
+                    }
+            }
+        }
+
+        $sql .= ' ' . ltrim(implode(" ", $tw), ' AND ');
+        return $outerOperand.'('.$sql.')';
+    }
+
+
+    /**
+     * Build and append a WHERE statement to the query
+     *
+     * {@inheritDoc}
+     */
+    protected function prepareWhere()
+    {
+        $tw = array();
+        $sql = 'WHERE';
+        foreach ($this->_where as $key => $condition) {
+
+            if (is_array($condition)) {
+                foreach ($condition as $k => $v) {
+
+                    if (is_numeric($k)) {
+                        $tw[] = $this->prepareNestedWhere($v);
+                    } else {
+                        $operand = empty($tw) ? '' : 'AND';
+                        $operator = '=';
+                        if ($k === 0) {
+                            $tw[] = $operand . ' ' . $v;
+                        } else
+                            if (is_string($k)) {
+                                $op = explode(':', $k);
+                                if (count($op) == 1) {
+                                    $field = $op[0];
+
+                                } else
+                                    if (in_array($op[0], $this->_conditionals)) {
+                                        $operand = 'OR';
+                                        $field = $op[1];
+                                        if (!empty($op[2])) {
+                                            $operator = $op[2];
+                                        }
+                                    } else {
+                                        if (!empty($op[1])) {
+                                            $operator = $op[1];
+                                        }
+                                        $field = $op[0];
+                                    }
+                                    $tw[] = $operand . ' ' . $this->escape($field) . ' ' . $operator . ' ' . $this->addParam($field, $v);
                             }
-                            $field = $op[0];
-                        }
-                        $tw[] = $operand.' '.$this->escape($field).' '.$operator.' '.$this->addParam($field,$v);
                     }
                 }
             }
         }
-        $sql .= ' '.ltrim(implode(" ",$tw),' AND ');
+        $sql .= ' ' . ltrim(implode(" ", $tw), ' AND ');
         $this->_preparedSql[] = $sql;
     }
 
     /**
      * {@inheritDoc}
      */
-    protected function prepareSort() {
-        $sort= reset($this->_sort);
+    protected function prepareSort()
+    {
+        $sort = reset($this->_sort);
         $sql = 'ORDER BY ';
         $sql .= $this->escape($sort['column']);
         if ($sort['direction']) $sql .= ' ' . $sort['direction'];
-        while ($sortby= next($this->_sort)) {
+        while ($sortby = next($this->_sort)) {
             $sql .= ', ';
             $sql .= $this->escape($sortby['column']);
             if ($sortby['direction']) $sql .= ' ' . $sortby['direction'];
@@ -165,8 +228,9 @@ class rbQuery_mysql extends rbQuery {
      * 
      * {@inheritDoc}
      */
-    protected function prepareLimit() {
-        $this->_preparedSql[] = 'LIMIT '.(!empty($this->_offset) ? $this->_offset.',' : '').$this->_limit;
+    protected function prepareLimit()
+    {
+        $this->_preparedSql[] = 'LIMIT ' . (!empty($this->_offset) ? $this->_offset . ',' : '') . $this->_limit;
     }
 
     /**
@@ -174,9 +238,10 @@ class rbQuery_mysql extends rbQuery {
      *
      * @return int The number of results for the query
      */
-    public function count() {
+    public function count()
+    {
         $total = 0;
-        $this->setColumns(array('COUNT(*) '.$this->modx->escape('ct')));
+        $this->setColumns(array('COUNT(*) ' . $this->modx->escape('ct')));
         if ($this->execute()) {
             $count = $this->getResults();
             if (!empty($count) && !empty($count[0]['ct'])) {
@@ -187,3 +252,4 @@ class rbQuery_mysql extends rbQuery {
         return $total;
     }
 }
+
